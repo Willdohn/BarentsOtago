@@ -1,0 +1,524 @@
+---
+title: "Network Analysis"
+author: "3776846 - WILLIAM DOHN"
+date: "2024-02-14"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+install.packages("glue", repos = "http://cran.us.r-project.org")
+install.packages("igraph", repos = "http://cran.us.r-project.org")
+install.packages("NetIndices", repos = "http://cran.us.r-project.org")
+install.packages("cheddar", repos = "http://cran.us.r-project.org")
+install.packages("dplyr", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(glue)
+library(igraph)
+library(NetIndices)
+library(cheddar)
+library(dplyr)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+file_path <- file.path("PairWiseList (1).txt") #Replace by the path to the file
+
+my_first_graph <- readr::read_delim(
+  file = file_path,
+  delim = "\t",
+  col_types = "cccc",
+  col_names = TRUE) 
+
+pairwise_list <- my_first_graph |>
+  select(PREY, PREDATOR) #select the columns "PREY" and "PREDATOR"
+
+prey <- pairwise_list |>
+  pull(PREY)
+
+predator <- pairwise_list |>
+  pull(PREDATOR)
+
+nodes <- unique(c(prey, predator))
+n_nodes <- length (nodes)
+#233 nodes
+
+empty_adj_matrix <- matrix(
+  data = 0,
+  nrow = n_nodes,
+  ncol = n_nodes,
+  dimnames = list(nodes, nodes))
+
+```
+
+```{r}
+pairwise_to_adjacency <- function(from, to) {
+    nodes <- unique(c(from, to))
+    n_nodes <- length(nodes)
+    if (length(from) != length(to)) {stop("from and to must have same length")}
+ 
+    n_links <- length(from)
+ 
+    adj_matrix <- matrix(
+        data = 0, 
+        nrow = n_nodes, 
+        ncol = n_nodes,
+        dimnames = list(nodes, nodes))
+ 
+    for(l in 1:n_links) {
+        a_prey <- from[l]
+        a_predator <- to[l]
+        adj_matrix[a_prey, a_predator] <- 1
+    }
+    return(adj_matrix)
+}
+```
+
+```{r}
+adj_matrix <- pairwise_to_adjacency(from = prey, to = predator)
+ 
+sum(adj_matrix) == nrow(pairwise_list) # check if as many links as 1s in the matrix
+#TRUE
+
+network_foodweb <- igraph::graph_from_adjacency_matrix( adjmatrix = adj_matrix, # see ?graph_from_adjacency_matrix
+                                                        mode = "directed", # directed network
+                                                        weighted = NULL, # no weights
+                                                        diag = TRUE, # 1s at diagonal
+                                                        add.colnames = NULL # colnames of matrix as node attributes
+                                                       )
+```
+
+```{r}
+vector_nodes <- igraph::V(network_foodweb) # subset the list of vertices/nodes
+vector_links <- igraph::E(network_foodweb) # subset the list of edges/links
+```
+
+```{r}
+plot(network_foodweb)
+```
+```{r}
+# from the matrix
+nrow(adj_matrix) == ncol(adj_matrix) # Check that the adjacency is squared
+all(row.names(adj_matrix) == colnames(adj_matrix)) # Check that the squared adjacency has all nodes as rows and columns
+ 
+nodes_mat <- colnames(adj_matrix)
+S_mat <- length(nodes)
+L_mat <- sum(adj_matrix) # the links are all the ones so the sum of 0s and 1s will give the total number of realized links
+```
+```{r}
+# from the network using igraph
+nodes_net <- V(network_foodweb)
+S_net <- vcount(network_foodweb) # count the number of vertices or nodes
+L_net <- ecount(network_foodweb) # count the number of edges or links
+ 
+print(glue::glue("This graph has {S_net} nodes that share {L_net} links."))
+# This graph has 233 nodes that share 2218 links.
+```
+DERIVING SECONDARY METRICS
+LINKAGE DENSITY
+
+```{r}
+Z_mat <- L_mat / S_mat # linkage density or average number of links per nodes
+Z_net <- ecount(network_foodweb) / vcount(network_foodweb)
+ 
+print(glue::glue("Linkage Density: {Z_net}"))
+# Linkage Density: 9.51931330472103
+```
+Connectance or EDGE density
+```{r}
+C_mat <- L_mat / S_mat ^ 2
+C_net <- edge_density(network_foodweb, loops = TRUE) # this network includes loops (A --> A) which represent cannibalism in nature
+print(glue::glue("Connectance: {C_net}"))
+# Connectance: 0.0408554219086739
+# A value of 0.041 tells us that only 4% of the possible links are realized. This network has a low number of connections.
+
+distance_net <- distances(network_foodweb, 
+          v = V(network_foodweb), # from where are we starting: here any nodes
+          to = V(network_foodweb), # to where are we going: here any nodes
+          mode = "all")
+longest_path <- diameter(network_foodweb, directed = TRUE)
+print(glue::glue("Diameter: {longest_path}"))
+# Diameter: 7
+
+```
+```{r}
+paths_S_to_S <-  shortest_paths(
+    network_foodweb,
+    from = V(network_foodweb),
+    to = V(network_foodweb),
+    mode = "all",
+    output = "both")
+ 
+#paths_S_to_S 
+# $vpath[[27]]
+# + 3/233 vertices, named, from 49d27c4:
+#   [1] ACARTIA_SPP        BOREOGADUS_SAIDA   APHERUSA_GLACIALIS
+```
+```{r}
+avg_path_length <- mean_distance(
+    network_foodweb,
+    directed = TRUE,
+    unconnected = TRUE # if the graphs is disconnected, only the existing paths are considered
+)
+print(glue::glue("Average distance: {avg_path_length}"))
+# Average distance: 2.3070777062858
+
+```
+```{r}
+# FORMATTING Look at the difference! SO so crowded still though
+plot(
+    network_foodweb,
+    vertex.size = 0.001, # control node size
+    vertex.label.cex = 1.5, # control label size (names of the nodes)
+    vertex.label.dist= 0.3, # control label distance to nodes
+    edge.arrow.size= 0.02 # control the size of the arrow
+)
+
+```
+```{r}
+vertex_labels <- vertex_attr(network_foodweb, "name") # access vertex attribute "name"
+vertex_labels_parts <- vertex_labels |> 
+                       stringr::str_split_fixed("_", n = 2)  
+ 
+colnames(vertex_labels_parts) <- c("GENUS", "SPECIES")
+vertex_labels_parts <- as.data.frame(vertex_labels_parts)
+ 
+genus_3let <- stringr::str_sub(vertex_labels_parts$GENUS, start = 1L, end = 3L)
+species_3let <- stringr::str_sub(vertex_labels_parts$SPECIES, start = 1L, end = 3L)
+
+species_3let <- ifelse(nchar(species_3let) == 0, "TAX", species_3let)
+
+short_labels <- stringr::str_c(genus_3let, species_3let, sep = "_")
+head(short_labels, n = 10)
+# [1] "ACA_SPP" "AUT_FLA" "DIA_TAX" "HET_FLA" "MIX_FLA" "PRO_TAX" "GAM_IND" "MAC_TAX" "POL_TAX" "CAL_FIN"
+
+network_foodweb <- set.vertex.attribute(network_foodweb, "short_label", value = short_labels) # set (new) attributes for the nodes
+get.vertex.attribute(network_foodweb) # shows the attributes of the nodes
+
+plot(
+    network_foodweb,
+    vertex.size = 0.001, # control node size
+    vertex.label = V(network_foodweb)$short_label,
+    vertex.label.cex = 0.3, # control label size (names of the nodes)
+    vertex.label.dist= 0.2, # control label distance to nodes=±===
+    edge.arrow.size= 0.02 # control the size of the arrow
+)
+
+```
+```{r}
+?layout_as_star()
+?layout_as_tree()
+?layout_in_circle()
+?layout_nicely()
+?layout_on_grid()
+?layout_on_sphere()
+?layout_randomly()
+?layout_with_dh()
+?layout_with_fr()
+
+l_rand <- layout_randomly(network_foodweb) # compute layout
+plot(
+    network_foodweb,
+    layout = l_rand, # set layout
+    vertex.size = 0.001, # control node size
+    vertex.label = V(network_foodweb)$short_label,
+    vertex.label.cex = 0.5, # control label size (names of the nodes)
+    vertex.label.dist= 0.02, # control label distance to nodes
+    edge.arrow.size= 0.1 # control the size of the arrow
+)
+```
+```{r}
+l_grid <- layout_on_grid(network_foodweb)
+plot(
+    network_foodweb,
+    layout = l_grid,
+    vertex.size = 0.001, # control node size
+    vertex.label = V(network_foodweb)$short_label,
+    vertex.label.cex = 0.3, # control label size (names of the nodes)
+    vertex.label.dist= 0.3, # control label distance to nodes
+    edge.arrow.size= 0.2, # control the size of the arrow,
+    ylim = c(-1, 1),
+    xlim = c(-1, 1)
+)
+
+```
+```{r}
+l_circle <- layout_in_circle(network_foodweb)
+plot(
+    network_foodweb,
+    layout = l_circle,
+    vertex.size = 0.001, 
+    vertex.label =  NA, # NA removes labels and override any label modifiers
+    vertex.label.cex = 1, 
+    vertex.label.dist= 0.2,
+    edge.arrow.size= 0.05, 
+    ylim = c(-1, 1),
+    xlim = c(-1, 1)
+)
+
+```
+```{r}
+degree_nodes <- degree(
+    network_foodweb, 
+    v = V(network_foodweb), 
+    mode = "in"
+)
+plants_degree0 <- names(degree_nodes[which(degree_nodes == 0)])
+distance_to_plant <- distances( # all shortest paths 
+    network_foodweb,
+    v = V(network_foodweb)[V(network_foodweb)$name %in% plants_degree0], # select nodes based on their names
+    to = V(network_foodweb),
+    mode = "all"
+)
+ 
+shortest_distance_to_plant <- t(distance_to_plant) |> 
+    as_tibble(rownames = NA)  |> 
+    rownames_to_column(var = "species")
+ 
+shortest_distance_to_plant <- shortest_distance_to_plant |> 
+    rowwise()  |> 
+    mutate(shortest = min(across(plants_degree0)))  |>
+    identity()
+ 
+vect_shortest_distance_to_plant <- shortest_distance_to_plant |> 
+    pull(shortest, name = species)
+length_to_plant <- vect_shortest_distance_to_plant + 1 # by convention starting at 1
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+network_foodweb <- set.vertex.attribute(network_foodweb, "position", value = length_to_plant) # set new attributes for the nodes
+ 
+l_position <- layout_randomly(network_foodweb)
+l_position[, 2] <- length_to_plant
+```
+
+```{r}
+otago.links.data<-read.csv("~/Desktop/UCSB/All_Otago_Data_Files/Otago_Data_Links.csv")
+otago.nodes.data<-read.csv("~/Desktop/UCSB/All_Otago_Data_Files/Otago_Data_Nodes.csv")
+ 
+# Column names for data
+colnames(otago.links.data)
+colnames(otago.nodes.data)
+ 
+# Convert the data into a graph object using the first 2 columns of the dataset as an edgelist
+otago.graph<-graph.edgelist(as.matrix(otago.links.data[,1:2]))
+# Create graph object of just predator prey links
+otago.graph.p<-graph.edgelist(as.matrix(otago.links.data[1:1206,1:2]))
+ 
+# Get the web into matrix form
+otago.adjmatrix<-get.adjacency(otago.graph,sparse=F)
+otago.adjmatrix.p<-get.adjacency(otago.graph.p,sparse=F)
+ 
+# Get the basic network indices from the matrices with GenInd()
+ind.otago<-GenInd(otago.adjmatrix)
+ind.otago.p<-GenInd(otago.adjmatrix.p)
+ 
+# Now to plot these two webs to get a feel for what we are dealing with
+ 
+par(mar=c(.1,.1,.1,.1))
+plot.igraph(otago.graph,vertex.label=NA,vertex.size=3,edge.arrow.size=.25,layout=layout.circle)
+plot.igraph(otago.graph.p,vertex.label=NA,vertex.size=3,edge.arrow.size=.25,layout=layout.circle)
+
+```
+```{r}
+# The NetIndices package also has a function to get some of the trophic properties of the food web
+# TrophInd() takes in an adjacency matrix and gives an output of the trophic level of each node,
+# as well as an index of the degree of omnivory for each node
+ 
+troph.otago<-TrophInd(otago.adjmatrix)
+troph.otago.p<-TrophInd(otago.adjmatrix.p)
+ 
+# An interesting aside, by adding parasites to the web it increases the trophic level of all species in
+# this web.
+ 
+plot(troph.otago[1:123,1]~troph.otago.p[,1],xlab="Level Without Parasites",ylab="Level With Parasites")
+abline(a=0,b=1)                                     # Print new matrix
+
+```
+```{r}
+# An interesting use for this trophic level function is to then use trophic level as a plotting parameter.
+# This way, I can plot the food web nodes according to trophic height. I think that this adds greatly to a plot
+# of a food web, since you can gain more information about the trophic structure of the web by simply
+# glancing at the plot.
+ 
+# First we need to create a two-column matrix identifying the x and y values for each node.
+layout.matrix.1<-matrix(
+nrow=length(V(otago.graph)),  # Rows equal to the number of vertices
+ncol=2
+)
+layout.matrix.1[,1]<-runif(length(V(otago.graph))) # randomly assign along x-axis
+layout.matrix.1[,2]<-troph.otago$TL # y-axis value based on trophic level
+ 
+layout.matrix.1p<-matrix(
+nrow=length(V(otago.graph.p)),  # Rows equal to the number of vertices
+ncol=2
+)
+layout.matrix.1p[,1]<-runif(length(V(otago.graph.p)))
+layout.matrix.1p[,2]<-troph.otago.p$TL
+ 
+# Now we can use these matrices to define the layout instead of using the circle layout
+ 
+par(mar=c(.1,.1,.1,.1),mfrow=c(1,2))
+ 
+plot.igraph(otago.graph,
+vertex.label.cex=.35,
+vertex.size=3,
+edge.arrow.size=.25,
+layout=layout.matrix.1)
+ 
+plot.igraph(otago.graph.p,
+vertex.label.cex=.35,
+vertex.size=3,
+edge.arrow.size=.25,
+layout=layout.matrix.1p)
+ 
+# I am still working on the best way to plot the nodes along the x-axis. You may notice that using
+# runif() means that there is some chance that two nodes with the same trophic level
+# will be right on top of one another
+```
+```{r}
+wtc.otago<-walktrap.community(otago.graph)
+wtc.otago.p<-walktrap.community(otago.graph.p)
+ 
+par(mar=c(.1,.1,.1,.1),mfrow=c(1,2))
+ 
+plot.igraph(otago.graph,
+vertex.label.cex=.35,
+vertex.size=3,
+edge.arrow.size=.25,
+layout=layout.matrix.1,
+mark.groups=wtc.otago$membership,
+mark.col="green")
+ 
+plot.igraph(otago.graph.p,
+vertex.label.cex=.35,
+vertex.size=3,
+edge.arrow.size=.25,
+layout=layout.matrix.1p,
+mark.groups=wtc.otago.p$membership,
+mark.col="green")
+```
+
+```{r}
+deg.otago<-degree(otago.graph)
+deg.otago.p<-degree(otago.graph.p)
+ 
+# Using the degree distribution gives a better way to visualize any differences
+# Looking at the in degree tells us about how general the diets of consumers are
+dd.otago.in<-degree.distribution(otago.graph,mode="in",cumulative=T)
+dd.otago.in.p<-degree.distribution(otago.graph.p,mode="in",cumulative=T)
+ 
+# Out degree is a measure of the vulnerability of organisms, telling us how many consumers
+# eat each species.
+dd.otago.out<-degree.distribution(otago.graph,mode="out",cumulative=T)
+dd.otago.out.p<-degree.distribution(otago.graph.p,mode="out",cumulative=T)
+ 
+# And finally the degree ("all") simply tells us about how well connected that species is
+# within the network
+dd.otago<-degree.distribution(otago.graph,mode="all",cumulative=T)
+dd.otago.p<-degree.distribution(otago.graph.p,mode="all",cumulative=T)
+ 
+par(mfrow=c(2,2))
+plot(dd.otago.in,xlim=c(0,80))
+plot(dd.otago.out,xlim=c(0,80))
+plot(dd.otago.in.p,xlim=c(0,80))
+plot(dd.otago.out.p,xlim=c(0,80))
+ 
+power.fit<-power.law.fit(deg.otago)
+power.fit.p<-power.law.fit(deg.otago.p)
+ 
+par(mfrow=c(1,2))
+plot(dd.otago,log="xy")
+lines(1:180,10*(1:180)^((-power.fit$alpha)+1))
+ 
+plot(dd.otago.p,log="xy")
+lines(1:100,10*(1:100)^((-power.fit.p$alpha)+1))
+ 
+# I can look at the diameter of the two versions of the web
+# For food webs the diameter is going to be the longest food chain
+# since energy only flows in one direction, the diameter will read from
+# basal species to top predator.
+ 
+get.diameter(otago.graph)
+get.diameter(otago.graph.p)
+ 
+# I think that here it is interesting to note that the diameter of the predator-prey only
+# food web (which we expect to be smaller) is not a subset of the diameter for the
+# larger parasites included network
+ 
+# The next few properties are all related to the small world-ness of the network:
+ 
+transitivity(otago.graph)
+transitivity(otago.graph.p)
+ 
+# Betweenness is the number of shortest paths going through a specified node or edge
+ 
+otago.between<-betweenness(otago.graph)
+otago.between.p<-betweenness(otago.graph.p)
+ 
+plot(otago.between[1:123]~otago.between.p)
+abline(a=0,b=1)
+ 
+otago.edge.between<-edge.betweenness(otago.graph)
+otago.edge.between.p<-edge.betweenness(otago.graph.p)
+ 
+closeness(otago.graph)
+ 
+# Here are the adjacency matrices for each of the 13 subgraphs again
+s1<-matrix(c(0,1,0,0,0,1,0,0,0),nrow=3,ncol=3)
+s2<-matrix(c(0,1,1,0,0,1,0,0,0),nrow=3,ncol=3)
+s3<-matrix(c(0,1,0,0,0,1,1,0,0),nrow=3,ncol=3)
+s4<-matrix(c(0,0,1,0,0,1,0,0,0),nrow=3,ncol=3)
+s5<-matrix(c(0,1,1,0,0,0,0,0,0),nrow=3,ncol=3)
+d2<-matrix(c(0,1,1,1,0,1,0,0,0),nrow=3,ncol=3)
+d1<-matrix(c(0,1,1,0,0,1,0,1,0),nrow=3,ncol=3)
+d3<-matrix(c(0,0,1,1,0,0,1,0,0),nrow=3,ncol=3)
+d4<-matrix(c(0,0,0,1,0,1,0,1,0),nrow=3,ncol=3)
+d5<-matrix(c(0,1,1,0,0,1,1,0,0),nrow=3,ncol=3)
+d6<-matrix(c(0,1,1,1,0,1,1,1,0),nrow=3,ncol=3)
+d7<-matrix(c(0,1,1,1,0,1,1,0,0),nrow=3,ncol=3)
+d8<-matrix(c(0,1,1,1,0,0,1,0,0),nrow=3,ncol=3)
+ 
+# Turn them into a convenient list
+subgraph3.mat<-list(s1,s2,s3,s4,s5,d1,d2,d3,d4,d5,d6,d7,d8)
+# And then into a list of graph objects
+subgraph3.graph<-lapply(subgraph3.mat,graph.adjacency)
+ 
+# Count the number of the 13 different 3-node subgraphs in the two webs
+subgraph.freq.otago<-c()
+subgraph.freq.otago.p<-c()
+for(i in 1:13){
+subgraph.freq.otago[i]<-
+graph.count.subisomorphisms.vf2(otago.graph,subgraph3.graph[[i]])
+subgraph.freq.otago.p[i]<-
+graph.count.subisomorphisms.vf2(otago.graph.p,subgraph3.graph[[i]])
+}
+ 
+plot(subgraph.freq.otago,type="o",lty=3, xlab="Subgraph",ylab="Frequency")
+points(subgraph.freq.otago.p,type="o",lty=2)
+ 
+plot(subgraph.freq.otago~subgraph.freq.otago.p)
+abline(a=0,b=1)
+
+```
+```{r}
+
+```
+
